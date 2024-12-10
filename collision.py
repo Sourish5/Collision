@@ -1,112 +1,85 @@
-#Input format : --particles n ... xr yr vxr vyr mr r g b ...
-
-import argparse
 import pygame
 import numpy as np
 
+# Particle Class
 class Particle:
-    def __init__(self, position, velocity, mass, color):
-        self.position = pygame.Vector2(position)
-        self.velocity = pygame.Vector2(velocity)
-        self.mass = mass
+    def __init__(self, color, mass, position, velocity, acceleration, e_particle, e_walls):
         self.color = color
-        self.radius = np.pi * (mass ** 0.5)
+        self.mass = mass
+        self.radius = np.pi * (mass ** 0.5)  # Radius proportional to sqrt of mass
+        self.position = position
+        self.velocity = velocity
+        self.acceleration = acceleration
+        self.e_particle = e_particle  # Restitution with other particles
+        self.e_walls = e_walls        # Restitution with walls
 
-    def draw(self, screen):
-        pygame.draw.circle(screen, self.color, self.position, int(self.radius))
+# Simulation Parameters
+space_x, space_y = 600, 600
+fps = 144
+background = (0, 0, 0)
 
-    def update_position(self, dt):
-        self.position += self.velocity * dt
+# Initialize Particles
+particles = [
+    Particle((70, 255, 255), 20, pygame.Vector2(100, 200), pygame.Vector2(200, 500), pygame.Vector2(0, 0), 1, 1),
+    Particle((255, 0, 255), 50, pygame.Vector2(200, 200), pygame.Vector2(-50, 60), pygame.Vector2(0, 0), 1, 1),
+    Particle((120,120,120),40,pygame.Vector2(300,200),pygame.Vector2(100,-30),pygame.Vector2(0,0),1,1),
+    Particle((70,80,120),40,pygame.Vector2(70,50),pygame.Vector2(10,-130),pygame.Vector2(0,0),1,1),
+    Particle((120,100,120),40,pygame.Vector2(120,20),pygame.Vector2(70,-30),pygame.Vector2(0,0),1,1),
+]
 
-    def handle_wall_collision(self):
-        if self.position.x - self.radius < 0 or self.position.x + self.radius > SCREEN_WIDTH:
-            self.velocity.x = -self.velocity.x
-        if self.position.y - self.radius < 0 or self.position.y + self.radius > SCREEN_HEIGHT:
-            self.velocity.y = -self.velocity.y
+# Initialize Pygame
+pygame.init()
+screen = pygame.display.set_mode([space_x, space_y])
+clock = pygame.time.Clock()
+dt = 1 / fps
+running = True
 
-        self.position.x = np.clip(self.position.x, self.radius, SCREEN_WIDTH - self.radius)
-        self.position.y = np.clip(self.position.y, self.radius, SCREEN_HEIGHT - self.radius)
+# Main Loop
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
 
+    screen.fill(background)
 
-def resolve_collision(p1, p2):
-    relative_position = p2.position - p1.position
-    distance_squared = relative_position.magnitude_squared()
+    # Draw Particles
+    for particle in particles:
+        pygame.draw.circle(screen, particle.color, particle.position, int(particle.radius))
 
-    if relative_position.magnitude() < p1.radius + p2.radius:
-        relative_velocity = p1.velocity - p2.velocity
-        velocity_dot = relative_velocity.dot(relative_position) / distance_squared
-        impulse = 2 * velocity_dot / (1 / p1.mass + 1 / p2.mass)
+    # Collision with Walls
+    for particle in particles:
+        if particle.position.x + particle.radius > space_x:
+            particle.velocity.x *= -particle.e_walls
+        if particle.position.x - particle.radius < 0:
+            particle.velocity.x *= -particle.e_walls
+        if particle.position.y + particle.radius > space_y:
+            particle.velocity.y *= -particle.e_walls
+        if particle.position.y - particle.radius < 0:
+            particle.velocity.y *= -particle.e_walls
 
-        p1.velocity -= impulse * relative_position / p1.mass
-        p2.velocity += impulse * relative_position / p2.mass
+    # Collision Between Particles
+    for i, p1 in enumerate(particles):
+        for j, p2 in enumerate(particles):
+            if i < j:  # Avoid double-checking and self-collision
+                rel_position = p2.position - p1.position
+                if rel_position.magnitude() < (p1.radius + p2.radius):  # Collision detected
+                    # Calculate new velocities (perfectly elastic collision)
+                    rel_velocity = p2.velocity - p1.velocity
+                    collision_normal = rel_position.normalize()
+                    velocity_diff = np.dot(rel_velocity, collision_normal)
+                    
+                    if velocity_diff < 0:  # Only resolve if particles are moving towards each other
+                        impulse = (2 * velocity_diff) / (p1.mass + p2.mass)
+                        p1.velocity += impulse * p2.mass * collision_normal
+                        p2.velocity -= impulse * p1.mass * collision_normal
 
+    # Update Particle Positions and Velocities
+    for particle in particles:
+        particle.position += particle.velocity * dt
+        particle.velocity += particle.acceleration * dt
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="2D Particle Collision Simulator")
-    parser.add_argument(
-        "--particles",
-        type=int,
-        required=True,
-        help="Number of particles to simulate."
-    )
-    parser.add_argument(
-        "--details",
-        type=str,
-        nargs="+",
-        required=True,
-        help="Details of particles: x,y,vx,vy,mass,color(r,g,b). Repeat for each particle."
-    )
-    return parser.parse_args()
+    # Display Frame
+    pygame.display.flip()
+    clock.tick(fps)
 
-
-def main():
-    args = parse_arguments()
-    num_particles = args.particles
-    details = args.details
-
-    if len(details) != num_particles * 7:
-        print("Invalid number of particle details. Each particle requires 7 values: x, y, vx, vy, mass, r, g, b.")
-        return
-
-    pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("2D Collision Simulator")
-    clock = pygame.time.Clock()
-
-    particles = []
-    for i in range(num_particles):
-        x, y, vx, vy, mass, r, g, b = map(float, details[i * 7: (i + 1) * 7])
-        particles.append(Particle(position=(x, y), velocity=(vx, vy), mass=mass, color=(int(r), int(g), int(b))))
-
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        screen.fill(BACKGROUND_COLOR)
-
-        for particle in particles:
-            particle.update_position(1 / FPS)
-            particle.handle_wall_collision()
-
-        for i in range(len(particles)):
-            for j in range(i + 1, len(particles)):
-                resolve_collision(particles[i], particles[j])
-
-        for particle in particles:
-            particle.draw(screen)
-
-        pygame.display.flip()
-        clock.tick(FPS)
-
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    SCREEN_WIDTH = 600
-    SCREEN_HEIGHT = 600
-    FPS = 144
-    BACKGROUND_COLOR = (0, 0, 0)
-
-    main()
+pygame.quit()
